@@ -14,10 +14,11 @@
 
 # RNS extension of the rlwe library
 
+load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@protobuf//bazel:proto_library.bzl", "proto_library")
-load("@protobuf//rust:defs.bzl", "rust_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("@protobuf//rust:defs.bzl", "rust_proto_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -147,9 +148,6 @@ cc_library(
     hdrs = ["crt_interpolation.h"],
     deps = [
         ":rns_modulus",
-        "//shell_encryption:integral_types",
-        "//shell_encryption:montgomery",
-        "@com_google_absl//absl/numeric:int128",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
     ],
