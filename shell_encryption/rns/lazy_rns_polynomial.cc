@@ -118,6 +118,110 @@ absl::Status LazyRnsPolynomial<ModularInt64>::FusedMulAddInPlace(
   return absl::OkStatus();
 }
 
+template <typename ModularInt>
+absl::Status LazyRnsPolynomial<ModularInt>::FusedMulAddInPlace(
+    const LazyRnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
+    absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
+  if (current_level_ == maximum_level_) {
+    Refresh(moduli);
+  }
+  int num_moduli = moduli.size();
+  int num_coeffs = coeff_vectors_[0].size();
+  const auto& b_coeff_vectors = b.Coeffs();
+  for (int i = 0; i < num_moduli; ++i) {
+    for (int j = 0; j < num_coeffs; ++j) {
+      coeff_vectors_[i][j] +=
+          a.coeff_vectors_[i][j] *
+          b_coeff_vectors[i][j].GetMontgomeryRepresentation();
+    }
+  }
+  current_level_++;
+  return absl::OkStatus();
+}
+
+template <typename ModularInt>
+absl::StatusOr<LazyRnsPolynomial<ModularInt>>
+LazyRnsPolynomial<ModularInt>::CreateFromSum(
+    const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
+    absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
+  if (a.IsNttForm() ^ b.IsNttForm()) {
+    return absl::InvalidArgumentError(
+        "Polynomials `a` and `b` must be in the same form.");
+  }
+  int num_coeffs = a.NumCoeffs();
+  if (b.NumCoeffs() != num_coeffs) {
+    return absl::InvalidArgumentError(
+        "Polynomials `a` and `b` must have the same number of coefficients.");
+  }
+  int num_moduli = moduli.size();
+  if (a.NumModuli() != num_moduli || b.NumModuli() != num_moduli) {
+    return absl::InvalidArgumentError(
+        "Polynomials `a` and `b` must be defined wrt `moduli`");
+  }
+
+  // Get the maximal number of FMA operations can be made wrt the RNS moduli.
+  RLWE_ASSIGN_OR_RETURN(int log_maximum_level, ComputeLogMaximalLevel(moduli));
+
+  // Let's add the CRT coefficients.
+  std::vector<hwy::AlignedVector<BigInt>> coeff_vectors(num_moduli);
+  for (int i = 0; i < num_moduli; ++i) {
+    coeff_vectors[i].resize(num_coeffs);
+    const auto& a_coeffs = a.Coeffs()[i];
+    const auto& b_coeffs = b.Coeffs()[i];
+    for (int j = 0; j < num_coeffs; ++j) {
+      coeff_vectors[i][j] =
+          static_cast<BigInt>(a_coeffs[j].GetMontgomeryRepresentation() +
+                              b_coeffs[j].GetMontgomeryRepresentation());
+    }
+  }
+
+  return LazyRnsPolynomial(std::move(coeff_vectors),
+                           /*current_level=*/static_cast<BigInt>(1),
+                           static_cast<BigInt>(1) << log_maximum_level);
+}
+
+template <typename ModularInt>
+absl::StatusOr<LazyRnsPolynomial<ModularInt>>
+LazyRnsPolynomial<ModularInt>::CreateFromDifference(
+    const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
+    absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
+  if (a.IsNttForm() ^ b.IsNttForm()) {
+    return absl::InvalidArgumentError(
+        "Polynomials `a` and `b` must be in the same form.");
+  }
+  int num_coeffs = a.NumCoeffs();
+  if (b.NumCoeffs() != num_coeffs) {
+    return absl::InvalidArgumentError(
+        "Polynomials `a` and `b` must have the same number of coefficients.");
+  }
+  int num_moduli = moduli.size();
+  if (a.NumModuli() != num_moduli || b.NumModuli() != num_moduli) {
+    return absl::InvalidArgumentError(
+        "Polynomials `a` and `b` must be defined wrt `moduli`");
+  }
+
+  // Get the maximal number of FMA operations can be made wrt the RNS moduli.
+  RLWE_ASSIGN_OR_RETURN(int log_maximum_level, ComputeLogMaximalLevel(moduli));
+
+  // Let's add the CRT coefficients.
+  std::vector<hwy::AlignedVector<BigInt>> coeff_vectors(num_moduli);
+  for (int i = 0; i < num_moduli; ++i) {
+    coeff_vectors[i].resize(num_coeffs);
+    const auto& a_coeffs = a.Coeffs()[i];
+    const auto& b_coeffs = b.Coeffs()[i];
+    const auto qi = moduli[i]->Modulus();
+    for (int j = 0; j < num_coeffs; ++j) {
+      coeff_vectors[i][j] =
+          static_cast<BigInt>(a_coeffs[j].GetMontgomeryRepresentation()) + qi -
+          b_coeffs[j].GetMontgomeryRepresentation();
+    }
+  }
+
+  return LazyRnsPolynomial(std::move(coeff_vectors),
+                           /*current_level=*/static_cast<BigInt>(1),
+                           static_cast<BigInt>(1) << log_maximum_level);
+}
+
 template class LazyRnsPolynomial<MontgomeryInt<Uint16>>;
 template class LazyRnsPolynomial<MontgomeryInt<Uint32>>;
 template class LazyRnsPolynomial<MontgomeryInt<Uint64>>;
