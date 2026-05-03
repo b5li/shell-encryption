@@ -100,6 +100,17 @@ void BatchSubMontgomeryRepNoHwy(
     absl::Span<const MontgomeryInt<Integer>> b, Integer q,
     hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
 
+// Multiply `a` to `output`.
+template <typename Integer>
+void BatchMulInPlaceMontgomeryRep(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
+template <typename Integer>
+void BatchMulInPlaceMontgomeryRepNoHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
 }  // namespace internal
 }  // namespace rlwe
 

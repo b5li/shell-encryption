@@ -337,6 +337,40 @@ absl::Status LazyRnsPolynomial<ModularInt>::MulInPlace(
   return absl::OkStatus();
 }
 
+template <>
+absl::Status LazyRnsPolynomial<ModularInt32>::MulInPlace(
+    const RnsPolynomial<ModularInt32>& a,
+    absl::Span<const PrimeModulus<ModularInt32>* const> moduli) {
+  if (current_level_ == maximum_level_) {
+    Refresh(moduli);
+  }
+  int num_moduli = moduli.size();
+  const auto& a_coeff_vectors = a.Coeffs();
+  for (int i = 0; i < num_moduli; ++i) {
+    internal::BatchMulInPlaceMontgomeryRep<Uint32>(a_coeff_vectors[i],
+                                                   coeff_vectors_[i]);
+  }
+  current_level_++;
+  return absl::OkStatus();
+}
+
+template <>
+absl::Status LazyRnsPolynomial<ModularInt64>::MulInPlace(
+    const RnsPolynomial<ModularInt64>& a,
+    absl::Span<const PrimeModulus<ModularInt64>* const> moduli) {
+  if (current_level_ == maximum_level_) {
+    Refresh(moduli);
+  }
+  int num_moduli = moduli.size();
+  const auto& a_coeff_vectors = a.Coeffs();
+  for (int i = 0; i < num_moduli; ++i) {
+    internal::BatchMulInPlaceMontgomeryRep<Uint64>(a_coeff_vectors[i],
+                                                   coeff_vectors_[i]);
+  }
+  current_level_++;
+  return absl::OkStatus();
+}
+
 template <typename ModularInt>
 absl::StatusOr<LazyRnsPolynomial<ModularInt>>
 LazyRnsPolynomial<ModularInt>::CreateFromSum(

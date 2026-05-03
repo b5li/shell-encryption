@@ -51,6 +51,24 @@ void BatchFusedMulAddMontgomeryRepHwy(
 }
 
 template <typename Integer>
+void BatchFusedMulSumAddMontgomeryRepHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    absl::Span<const MontgomeryInt<Integer>> c,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output) {
+  BatchFusedMulSumAddMontgomeryRepNoHwy(a, b, c, output);
+}
+
+template <typename Integer>
+void BatchFusedMulDifferenceAddMontgomeryRepHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    absl::Span<const MontgomeryInt<Integer>> c, Integer q,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output) {
+  BatchFusedMulDifferenceAddMontgomeryRepNoHwy(a, b, c, q, output);
+}
+
+template <typename Integer>
 void BatchAddMontgomeryRepHwy(
     absl::Span<const MontgomeryInt<Integer>> a,
     absl::Span<const MontgomeryInt<Integer>> b,
@@ -64,6 +82,13 @@ void BatchSubMontgomeryRepHwy(
     absl::Span<const MontgomeryInt<Integer>> b, Integer q,
     hwy::AlignedVector<typename BigInt<Integer>::value_type>& output) {
   BatchSubMontgomeryRepNoHwy(a, b, output);
+}
+
+template <typename Integer>
+void BatchMulInPlaceMontgomeryRepHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output) {
+  BatchMulInPlaceMontgomeryRepNoHwy(a, output);
 }
 
 #else
@@ -280,18 +305,11 @@ void BatchFusedMulSumAddMontgomeryRepHwy(absl::Span<const ModularInt64> a,
   int64_t i = 0;
 
   for (; i + N <= num_coeffs; i += N) {
-    // Load the lower N/2 and upper N/2 values from `output`.
-    Uint64* output0_ptr = reinterpret_cast<Uint64*>(&output[i]);
-    Uint64* output1_ptr = reinterpret_cast<Uint64*>(&output[i]) + N;
-    auto output0 = hn::Load(d, output0_ptr);
-    auto output1 = hn::Load(d, output1_ptr);
-
     const Uint64* a_ptr = reinterpret_cast<const Uint64*>(&a[i]);
     const Uint64* b_ptr = reinterpret_cast<const Uint64*>(&b[i]);
     const Uint64* c_ptr = reinterpret_cast<const Uint64*>(&c[i]);
     auto a_vec = hn::LoadU(d, a_ptr);
     auto b_vec = hn::LoadU(d, b_ptr);
-    auto c_vec = hn::LoadU(d, c_ptr);
 
     // Compute a[i] + b[i], assuming no overflow.
     auto ab_vec = hn::Add(a_vec, b_vec);
@@ -305,6 +323,7 @@ void BatchFusedMulSumAddMontgomeryRepHwy(absl::Span<const ModularInt64> a,
     // each block of four 64-bit values, and get
     //   mul0 = [abc[0].lo, abc[0].hi, abc[1].lo, abc[1].hi, ...]
     //   mul1 = [abc[N/2].lo, abc[N/2].hi, abc[N/2+1].lo, abc[N/2+1].hi, ...]
+    auto c_vec = hn::LoadU(d, c_ptr);
     auto mul_even = hn::MulEven(ab_vec, c_vec);
     auto mul_odd = hn::MulOdd(ab_vec, c_vec);
     auto mul_interleave0 = hn::InterleaveWholeLower(d, mul_even, mul_odd);
@@ -312,19 +331,26 @@ void BatchFusedMulSumAddMontgomeryRepHwy(absl::Span<const ModularInt64> a,
     auto mul0 = hn::Per4LaneBlockShuffle<3, 1, 2, 0>(mul_interleave0);
     auto mul1 = hn::Per4LaneBlockShuffle<3, 1, 2, 0>(mul_interleave1);
 
+    // Load the lower N/2 and upper N/2 values from `output`.
+    Uint64* output0_ptr = reinterpret_cast<Uint64*>(&output[i]);
+    auto output0 = hn::Load(d, output0_ptr);
+
     // Add the products to the output lanes. A carry bit occurs when the new
     // lower 64-bit value becomes smaller, and we add 1 to the upper 64-bit lane
     // if that happens.
     auto output0_new = hn::Add(output0, mul0);
-    auto output1_new = hn::Add(output1, mul1);
     auto mask_carry0 = hn::And(hn::Lt(output0_new, output0), mask_lo);
-    auto mask_carry1 = hn::And(hn::Lt(output1_new, output1), mask_lo);
     mask_carry0 = hn::SlideMask1Up(d, mask_carry0);  // move the mask to hi64
-    mask_carry1 = hn::SlideMask1Up(d, mask_carry1);  // move the mask to hi64
     output0 = hn::MaskedAddOr(output0_new, mask_carry0, output0_new, ones);
-    output1 = hn::MaskedAddOr(output1_new, mask_carry1, output1_new, ones);
-
     hn::Store(output0, d, output0_ptr);
+
+    // Load the upper N/2 values from `output`.
+    Uint64* output1_ptr = reinterpret_cast<Uint64*>(&output[i]) + N;
+    auto output1 = hn::Load(d, output1_ptr);
+    auto output1_new = hn::Add(output1, mul1);
+    auto mask_carry1 = hn::And(hn::Lt(output1_new, output1), mask_lo);
+    mask_carry1 = hn::SlideMask1Up(d, mask_carry1);  // move the mask to hi64
+    output1 = hn::MaskedAddOr(output1_new, mask_carry1, output1_new, ones);
     hn::Store(output1, d, output1_ptr);
   }
   delete[] mask_lo_bits;
@@ -429,12 +455,6 @@ void BatchFusedMulDifferenceAddMontgomeryRepHwy(
   int64_t i = 0;
 
   for (; i + N <= num_coeffs; i += N) {
-    // Load the lower N/2 and upper N/2 values from `output`.
-    Uint64* output0_ptr = reinterpret_cast<Uint64*>(&output[i]);
-    Uint64* output1_ptr = reinterpret_cast<Uint64*>(&output[i]) + N;
-    auto output0 = hn::Load(d, output0_ptr);
-    auto output1 = hn::Load(d, output1_ptr);
-
     const Uint64* a_ptr = reinterpret_cast<const Uint64*>(&a[i]);
     const Uint64* b_ptr = reinterpret_cast<const Uint64*>(&b[i]);
     const Uint64* c_ptr = reinterpret_cast<const Uint64*>(&c[i]);
@@ -463,26 +483,32 @@ void BatchFusedMulDifferenceAddMontgomeryRepHwy(
     auto mul0 = hn::Per4LaneBlockShuffle<3, 1, 2, 0>(mul_interleave0);
     auto mul1 = hn::Per4LaneBlockShuffle<3, 1, 2, 0>(mul_interleave1);
 
+    // Load the lower N/2 values from `output`.
+    Uint64* output0_ptr = reinterpret_cast<Uint64*>(&output[i]);
+    auto output0 = hn::Load(d, output0_ptr);
     // Add the products to the output lanes. A carry bit occurs when the new
     // lower 64-bit value becomes smaller, and we add 1 to the upper 64-bit lane
     // if that happens.
     auto output0_new = hn::Add(output0, mul0);
-    auto output1_new = hn::Add(output1, mul1);
     auto mask_carry0 = hn::And(hn::Lt(output0_new, output0), mask_lo);
-    auto mask_carry1 = hn::And(hn::Lt(output1_new, output1), mask_lo);
     mask_carry0 = hn::SlideMask1Up(d, mask_carry0);  // move the mask to hi64
-    mask_carry1 = hn::SlideMask1Up(d, mask_carry1);  // move the mask to hi64
     output0 = hn::MaskedAddOr(output0_new, mask_carry0, output0_new, ones);
-    output1 = hn::MaskedAddOr(output1_new, mask_carry1, output1_new, ones);
-
     hn::Store(output0, d, output0_ptr);
+
+    // Load the upper N/2 values from `output`.
+    Uint64* output1_ptr = reinterpret_cast<Uint64*>(&output[i]) + N;
+    auto output1 = hn::Load(d, output1_ptr);
+    auto output1_new = hn::Add(output1, mul1);
+    auto mask_carry1 = hn::And(hn::Lt(output1_new, output1), mask_lo);
+    mask_carry1 = hn::SlideMask1Up(d, mask_carry1);  // move the mask to hi64
+    output1 = hn::MaskedAddOr(output1_new, mask_carry1, output1_new, ones);
     hn::Store(output1, d, output1_ptr);
   }
   delete[] mask_lo_bits;
 
   // Handle the remaining elements in the input vectors.
   for (; i < num_coeffs; ++i) {
-    output[i] += static_cast<BigInt64>(a[i].GetMontgomeryRepresentation() +
+    output[i] += static_cast<BigInt64>(a[i].GetMontgomeryRepresentation() + q -
                                        b[i].GetMontgomeryRepresentation()) *
                  c[i].GetMontgomeryRepresentation();
   }
@@ -515,7 +541,7 @@ void BatchAddMontgomeryRepHwy(
     auto output1 = hn::Load(d2, output1_ptr);
     auto a_vec = hn::LoadU(d, a_ptr);  // a[i..i+N]
     auto b_vec = hn::LoadU(d, b_ptr);  // b[i..i+N]
-
+    // Assume no overflow
     const auto sum = hn::Add(a_vec, b_vec);
     const auto sum_lo = hn::PromoteLowerTo(d2, sum);
     hn::Store(hn::Add(sum_lo, output0), d2, output0_ptr);
@@ -558,9 +584,9 @@ void BatchAddMontgomeryRepHwy(absl::Span<const ModularInt64> a,
     auto a_vec = hn::LoadU(d, a_ptr);
     auto b_vec = hn::LoadU(d, b_ptr);
 
+    // Assume no overflow
     auto sum_lo = hn::Add(a_vec, b_vec);
-    auto carry = hn::Lt(sum_lo, a_vec);
-    auto sum_hi = hn::IfThenElseZero(carry, hn::Set(d, 1));
+    auto sum_hi = hn::Zero(d);
     auto sum0 = hn::InterleaveWholeLower(d, sum_lo, sum_hi);
     auto sum1 = hn::InterleaveWholeUpper(d, sum_lo, sum_hi);
 
@@ -671,6 +697,86 @@ void BatchSubMontgomeryRepHwy(absl::Span<const ModularInt64> a,
   for (; i < num_coeffs; ++i) {
     output[i] += static_cast<BigInt64>(a[i].GetMontgomeryRepresentation()) + q -
                  b[i].GetMontgomeryRepresentation();
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// MulInPlace
+////////////////////////////////////////////////////////////////////////////////
+
+// General version that should work for `Integer` smaller than 64-bit unsigned
+// types.
+template <typename Integer>
+void BatchMulInPlaceMontgomeryRepHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output) {
+  using BigInteger = typename BigInt<Integer>::value_type;
+  using D = hn::ScalableTag<Integer>;
+  using Wide = hwy::MakeWide<hn::TFromD<D>>;
+  const D d;                          // For lanes containing Integers.
+  const hn::Repartition<Wide, D> d2;  // For double width products of Integers.
+
+  const int N = hn::Lanes(d);  // This is guaranteed to be a power of two.
+  const int64_t num_coeffs = a.size();
+  int64_t i = 0;
+  for (; i + N <= num_coeffs; i += N) {
+    BigInteger* output0_ptr = &output[i];
+    BigInteger* output1_ptr = &output[i] + N / 2;
+    const Integer* a_ptr = reinterpret_cast<const Integer*>(&a[i]);
+    auto output0 = hn::Load(d2, output0_ptr);
+    auto output1 = hn::Load(d2, output1_ptr);
+
+    auto a_vec = hn::LoadU(d, a_ptr);  // a[i..i+N]
+    // Compute lower half
+    auto product0_new = hn::Mul(hn::PromoteLowerTo(d2, a_vec), output0);
+    hn::Store(hn::Add(output0, product0_new), d2, output0_ptr);
+
+    // Compute upper half
+    auto product1_new = hn::Mul(hn::PromoteUpperTo(d2, a_vec), output1);
+    hn::Store(hn::Add(output1, product1_new), d2, output1_ptr);
+  }
+
+  // For the remaining elements in `a` and `b`.
+  for (; i < num_coeffs; ++i) {
+    output[i] *= static_cast<BigInteger>(a[i].GetMontgomeryRepresentation());
+  }
+}
+
+using ModularInt64 = MontgomeryInt<Uint64>;
+using BigInt64 = ModularInt64::BigInt;
+
+// Specialized version for 64-bit integers, as multiplication needs more careful
+// treatment.
+template <>
+void BatchMulInPlaceMontgomeryRepHwy(absl::Span<const ModularInt64> a,
+                                     hwy::AlignedVector<BigInt64>& output) {
+  using D = hn::ScalableTag<Uint64>;
+  const D d;
+  const int N = hn::Lanes(d);
+  const int64_t num_coeffs = a.size();
+
+  int64_t i = 0;
+
+  for (; i + N <= num_coeffs; i += N) {
+    const Uint64* a_ptr = reinterpret_cast<const Uint64*>(&a[i]);
+    auto a_vec = hn::LoadU(d, a_ptr);
+
+    Uint64* output_ptr = reinterpret_cast<Uint64*>(&output[i]);
+
+    // Load the lower and upper uint64_t parts from `output`.
+    hn::Vec<decltype(d)> output_lo, output_hi;
+    hn::LoadInterleaved2(d, output_ptr, output_lo, output_hi);
+
+    auto prod_lo_lo = hn::Mul(output_lo, a_vec);
+    auto prod_lo_hi = hn::MulHigh(output_lo, a_vec);
+    auto prod_hi = hn::Add(hn::Mul(output_hi, a_vec), prod_lo_hi);
+
+    hn::StoreInterleaved2(prod_lo_lo, prod_hi, d, output_ptr);
+  }
+
+  // Handle the remaining elements in the input vectors.
+  for (; i < num_coeffs; ++i) {
+    output[i] += static_cast<BigInt64>(a[i].GetMontgomeryRepresentation());
   }
 }
 
@@ -926,6 +1032,49 @@ void BatchSubMontgomeryRep(
     absl::Span<const MontgomeryInt<Uint64>> b, Uint64 q,
     hwy::AlignedVector<BigInt<Uint64>::value_type>& output) {
   HWY_DYNAMIC_DISPATCH_T(BatchSubMontgomeryRepHwy64)(a, b, q, output);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// MulInPlace
+////////////////////////////////////////////////////////////////////////////////
+template <typename Integer>
+void BatchMulInPlaceMontgomeryRepNoHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output) {
+  using BigInteger = typename BigInt<Integer>::value_type;
+  for (int j = 0; j < a.size(); ++j) {
+    output[j] += static_cast<BigInteger>(a[j].GetMontgomeryRepresentation());
+  }
+}
+
+// For now we only instantiate the Uint32 and the specialized Uint64 versions,
+// as they are the most common integer types used in RNS RLWE schemes.
+HWY_EXPORT_T(BatchMulInPlaceMontgomeryRepHwy32,
+             BatchMulInPlaceMontgomeryRepHwy<Uint32>);
+HWY_EXPORT_T(BatchMulInPlaceMontgomeryRepHwy64,
+             BatchMulInPlaceMontgomeryRepHwy<Uint64>);
+
+template <typename T>
+void BatchMulInPlaceMontgomeryRep(
+    absl::Span<const MontgomeryInt<T>> a,
+    hwy::AlignedVector<typename BigInt<T>::value_type>& output) {
+  BatchMulInPlaceMontgomeryRepNoHwy(a, output);
+}
+
+// Specialized instantiation to use the highway version of FMA computation.
+template <>
+void BatchMulInPlaceMontgomeryRep(
+    absl::Span<const MontgomeryInt<Uint32>> a,
+    hwy::AlignedVector<BigInt<Uint32>::value_type>& output) {
+  HWY_DYNAMIC_DISPATCH_T(BatchMulInPlaceMontgomeryRepHwy32)(a, output);
+}
+
+// Specialized instantiation to use the highway version of FMA computation.
+template <>
+void BatchMulInPlaceMontgomeryRep(
+    absl::Span<const MontgomeryInt<Uint64>> a,
+    hwy::AlignedVector<BigInt<Uint64>::value_type>& output) {
+  HWY_DYNAMIC_DISPATCH_T(BatchMulInPlaceMontgomeryRepHwy64)(a, output);
 }
 
 }  // namespace rlwe::internal
