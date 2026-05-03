@@ -137,6 +137,22 @@ class RnsRlweCiphertext {
     return absl::OkStatus();
   }
 
+  absl::StatusOr<RnsPolynomial<ModularInt>> AddWithoutPad(
+      const RnsRlweCiphertext& other) const {
+    if (components_.empty() || other.components_.empty()) {
+      return absl::InvalidArgumentError("cannot add empty ciphertext");
+    }
+    return components_[0].Add(other.components_[0], moduli_);
+  }
+
+  absl::StatusOr<RnsPolynomial<ModularInt>> SubWithoutPad(
+      const RnsRlweCiphertext& other) const {
+    if (components_.empty() || other.components_.empty()) {
+      return absl::InvalidArgumentError("cannot subtract empty ciphertext");
+    }
+    return components_[0].Sub(other.components_[0], moduli_);
+  }
+
   // Homomorphically add another ciphertext `that` to this ciphertext without
   // updating the "a" component (useful if it can be precomputed).
   absl::Status AddInPlaceWithoutPad(const RnsRlweCiphertext& that) {
