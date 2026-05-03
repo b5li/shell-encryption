@@ -44,6 +44,36 @@ void BatchFusedMulAddMontgomeryRepNoHwy(
     absl::Span<const MontgomeryInt<Integer>> b,
     hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
 
+// Add (a[i] + b[i]) * c[i] to output[i].
+template <typename Integer>
+void BatchFusedMulSumAddMontgomeryRep(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    absl::Span<const MontgomeryInt<Integer>> c,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
+template <typename Integer>
+void BatchFusedMulSumAddMontgomeryRepNoHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    absl::Span<const MontgomeryInt<Integer>> c,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
+// Add (a[i] - b[i]) * c[i] to output[i].
+template <typename Integer>
+void BatchFusedMulDifferenceAddMontgomeryRep(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    absl::Span<const MontgomeryInt<Integer>> c, Integer q,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
+template <typename Integer>
+void BatchFusedMulDifferenceAddMontgomeryRepNoHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    absl::Span<const MontgomeryInt<Integer>> c, Integer q,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
 // Add `a` + `b` to `output`.
 template <typename Integer>
 void BatchAddMontgomeryRep(
