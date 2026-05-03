@@ -44,6 +44,32 @@ void BatchFusedMulAddMontgomeryRepNoHwy(
     absl::Span<const MontgomeryInt<Integer>> b,
     hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
 
+// Add `a` + `b` to `output`.
+template <typename Integer>
+void BatchAddMontgomeryRep(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
+template <typename Integer>
+void BatchAddMontgomeryRepNoHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
+// Add `a` - `b` mod `q` to `output`.
+template <typename Integer>
+void BatchSubMontgomeryRep(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b, Integer q,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
+template <typename Integer>
+void BatchSubMontgomeryRepNoHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b, Integer q,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
 }  // namespace internal
 }  // namespace rlwe
 

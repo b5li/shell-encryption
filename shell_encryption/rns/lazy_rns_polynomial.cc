@@ -180,6 +180,57 @@ LazyRnsPolynomial<ModularInt>::CreateFromSum(
                            static_cast<BigInt>(1) << log_maximum_level);
 }
 
+template <>
+absl::StatusOr<LazyRnsPolynomial<ModularInt32>>
+LazyRnsPolynomial<ModularInt32>::CreateFromSum(
+    const RnsPolynomial<ModularInt32>& a, const RnsPolynomial<ModularInt32>& b,
+    absl::Span<const PrimeModulus<ModularInt32>* const> moduli) {
+  int num_coeffs = a.NumCoeffs();
+  int num_moduli = moduli.size();
+
+  // Get the maximal number of FMA operations can be made wrt the RNS moduli.
+  RLWE_ASSIGN_OR_RETURN(int log_maximum_level, ComputeLogMaximalLevel(moduli));
+
+  // Let's add the CRT coefficients.
+  const auto& a_coeffs = a.Coeffs();
+  const auto& b_coeffs = b.Coeffs();
+  std::vector<hwy::AlignedVector<BigInt>> coeff_vectors(num_moduli);
+  for (int i = 0; i < num_moduli; ++i) {
+    coeff_vectors[i].resize(num_coeffs);
+    internal::BatchAddMontgomeryRep<Uint32>(a_coeffs[i], b_coeffs[i],
+                                            coeff_vectors[i]);
+  }
+  return LazyRnsPolynomial(std::move(coeff_vectors),
+                           /*current_level=*/static_cast<BigInt>(1),
+                           static_cast<BigInt>(1) << log_maximum_level);
+}
+
+template <>
+absl::StatusOr<LazyRnsPolynomial<ModularInt64>>
+LazyRnsPolynomial<ModularInt64>::CreateFromSum(
+    const RnsPolynomial<ModularInt64>& a, const RnsPolynomial<ModularInt64>& b,
+    absl::Span<const PrimeModulus<ModularInt64>* const> moduli) {
+  int num_coeffs = a.NumCoeffs();
+  int num_moduli = moduli.size();
+
+  // Get the maximal number of FMA operations can be made wrt the RNS moduli.
+  RLWE_ASSIGN_OR_RETURN(int log_maximum_level, ComputeLogMaximalLevel(moduli));
+
+  // Let's add the CRT coefficients.
+  const auto& a_coeffs = a.Coeffs();
+  const auto& b_coeffs = b.Coeffs();
+  std::vector<hwy::AlignedVector<BigInt>> coeff_vectors(num_moduli);
+  for (int i = 0; i < num_moduli; ++i) {
+    coeff_vectors[i].resize(num_coeffs);
+    internal::BatchAddMontgomeryRep<Uint64>(a_coeffs[i], b_coeffs[i],
+                                            coeff_vectors[i]);
+  }
+
+  return LazyRnsPolynomial(std::move(coeff_vectors),
+                           /*current_level=*/static_cast<BigInt>(1),
+                           static_cast<BigInt>(1) << log_maximum_level);
+}
+
 template <typename ModularInt>
 absl::StatusOr<LazyRnsPolynomial<ModularInt>>
 LazyRnsPolynomial<ModularInt>::CreateFromDifference(
@@ -215,6 +266,60 @@ LazyRnsPolynomial<ModularInt>::CreateFromDifference(
           static_cast<BigInt>(a_coeffs[j].GetMontgomeryRepresentation()) + qi -
           b_coeffs[j].GetMontgomeryRepresentation();
     }
+  }
+
+  return LazyRnsPolynomial(std::move(coeff_vectors),
+                           /*current_level=*/static_cast<BigInt>(1),
+                           static_cast<BigInt>(1) << log_maximum_level);
+}
+
+template <>
+absl::StatusOr<LazyRnsPolynomial<ModularInt32>>
+LazyRnsPolynomial<ModularInt32>::CreateFromDifference(
+    const RnsPolynomial<ModularInt32>& a, const RnsPolynomial<ModularInt32>& b,
+    absl::Span<const PrimeModulus<ModularInt32>* const> moduli) {
+  int num_coeffs = a.NumCoeffs();
+  int num_moduli = moduli.size();
+
+  // Get the maximal number of FMA operations can be made wrt the RNS moduli.
+  RLWE_ASSIGN_OR_RETURN(int log_maximum_level, ComputeLogMaximalLevel(moduli));
+
+  // Let's add the CRT coefficients.
+  std::vector<hwy::AlignedVector<BigInt>> coeff_vectors(num_moduli);
+  const auto& a_coeffs = a.Coeffs();
+  const auto& b_coeffs = b.Coeffs();
+  for (int i = 0; i < num_moduli; ++i) {
+    coeff_vectors[i].resize(num_coeffs);
+    const auto qi = moduli[i]->Modulus();
+    internal::BatchSubMontgomeryRep<Uint32>(a_coeffs[i], b_coeffs[i], qi,
+                                            coeff_vectors[i]);
+  }
+
+  return LazyRnsPolynomial(std::move(coeff_vectors),
+                           /*current_level=*/static_cast<BigInt>(1),
+                           static_cast<BigInt>(1) << log_maximum_level);
+}
+
+template <>
+absl::StatusOr<LazyRnsPolynomial<ModularInt64>>
+LazyRnsPolynomial<ModularInt64>::CreateFromDifference(
+    const RnsPolynomial<ModularInt64>& a, const RnsPolynomial<ModularInt64>& b,
+    absl::Span<const PrimeModulus<ModularInt64>* const> moduli) {
+  int num_coeffs = a.NumCoeffs();
+  int num_moduli = moduli.size();
+
+  // Get the maximal number of FMA operations can be made wrt the RNS moduli.
+  RLWE_ASSIGN_OR_RETURN(int log_maximum_level, ComputeLogMaximalLevel(moduli));
+
+  // Let's add the CRT coefficients.
+  std::vector<hwy::AlignedVector<BigInt>> coeff_vectors(num_moduli);
+  const auto& a_coeffs = a.Coeffs();
+  const auto& b_coeffs = b.Coeffs();
+  for (int i = 0; i < num_moduli; ++i) {
+    coeff_vectors[i].resize(num_coeffs);
+    const auto qi = moduli[i]->Modulus();
+    internal::BatchSubMontgomeryRep<Uint64>(a_coeffs[i], b_coeffs[i], qi,
+                                            coeff_vectors[i]);
   }
 
   return LazyRnsPolynomial(std::move(coeff_vectors),
