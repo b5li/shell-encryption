@@ -288,20 +288,6 @@ void BatchFusedMulSumAddMontgomeryRepHwy(absl::Span<const ModularInt64> a,
   const int N = hn::Lanes(d);
   const int64_t num_coeffs = a.size();
 
-  // Generate the masks on the even lanes, which correspond to the lower 64 bits
-  // of BigInt64 (unsigned 128-bit int) values in the output vector.
-  uint8_t* mask_lo_bits = new uint8_t[(N + 7) / 8];
-  for (int j = 0; j < (N + 7) / 8; ++j) {
-    mask_lo_bits[j] = 0;
-    for (int k = 0; k < 8; k += 2) {
-      mask_lo_bits[j] |= static_cast<uint8_t>(1 << k);
-    }
-  }
-  auto mask_lo = hn::LoadMaskBits(d, mask_lo_bits);
-  // A highway vector whose odd lanes (higher 64 bits of the output vector) are
-  // all 1's and even lanes are all 0's.
-  auto ones = hn::Slide1Up(d, hn::IfThenElseZero(mask_lo, hn::Set(d, 1)));
-
   int64_t i = 0;
 
   for (; i + N <= num_coeffs; i += N) {
@@ -311,49 +297,26 @@ void BatchFusedMulSumAddMontgomeryRepHwy(absl::Span<const ModularInt64> a,
     auto a_vec = hn::LoadU(d, a_ptr);
     auto b_vec = hn::LoadU(d, b_ptr);
 
-    // Compute a[i] + b[i], assuming no overflow.
+    // Compute (a[i] + b[i]) * c[i], assuming no overflow.
     auto ab_vec = hn::Add(a_vec, b_vec);
-
-    // `hn::MulEven` and `hn::MulOdd` on 64-bit inputs produce a vector of
-    // 64-bit values with even lanes storing the lower half of product and odd
-    // lanes storing the upper half. That is,
-    //   mul_even = [abc[0].lo, abc[0].hi, abc[2].lo, abc[2].hi, ...]
-    //   mul_odd  = [abc[1].lo, abc[1].hi, abc[3].lo, abc[3].hi, ...]
-    // So we first merge the lower and upper halves, and then permute within
-    // each block of four 64-bit values, and get
-    //   mul0 = [abc[0].lo, abc[0].hi, abc[1].lo, abc[1].hi, ...]
-    //   mul1 = [abc[N/2].lo, abc[N/2].hi, abc[N/2+1].lo, abc[N/2+1].hi, ...]
     auto c_vec = hn::LoadU(d, c_ptr);
-    auto mul_even = hn::MulEven(ab_vec, c_vec);
-    auto mul_odd = hn::MulOdd(ab_vec, c_vec);
-    auto mul_interleave0 = hn::InterleaveWholeLower(d, mul_even, mul_odd);
-    auto mul_interleave1 = hn::InterleaveWholeUpper(d, mul_even, mul_odd);
-    auto mul0 = hn::Per4LaneBlockShuffle<3, 1, 2, 0>(mul_interleave0);
-    auto mul1 = hn::Per4LaneBlockShuffle<3, 1, 2, 0>(mul_interleave1);
+    auto mul_lo = hn::Mul(ab_vec, c_vec);
+    auto mul_hi = hn::MulHigh(ab_vec, c_vec);
 
-    // Load the lower N/2 and upper N/2 values from `output`.
-    Uint64* output0_ptr = reinterpret_cast<Uint64*>(&output[i]);
-    auto output0 = hn::Load(d, output0_ptr);
+    // Load the lower and upper uint64_t parts of uint128 values from `output`.
+    Uint64* output_ptr = reinterpret_cast<Uint64*>(&output[i]);
+    hn::Vec<decltype(d)> output_lo, output_hi;
+    hn::LoadInterleaved2(d, output_ptr, output_lo, output_hi);
 
-    // Add the products to the output lanes. A carry bit occurs when the new
-    // lower 64-bit value becomes smaller, and we add 1 to the upper 64-bit lane
-    // if that happens.
-    auto output0_new = hn::Add(output0, mul0);
-    auto mask_carry0 = hn::And(hn::Lt(output0_new, output0), mask_lo);
-    mask_carry0 = hn::SlideMask1Up(d, mask_carry0);  // move the mask to hi64
-    output0 = hn::MaskedAddOr(output0_new, mask_carry0, output0_new, ones);
-    hn::Store(output0, d, output0_ptr);
+    auto output_lo_new = hn::Add(output_lo, mul_lo);
 
-    // Load the upper N/2 values from `output`.
-    Uint64* output1_ptr = reinterpret_cast<Uint64*>(&output[i]) + N;
-    auto output1 = hn::Load(d, output1_ptr);
-    auto output1_new = hn::Add(output1, mul1);
-    auto mask_carry1 = hn::And(hn::Lt(output1_new, output1), mask_lo);
-    mask_carry1 = hn::SlideMask1Up(d, mask_carry1);  // move the mask to hi64
-    output1 = hn::MaskedAddOr(output1_new, mask_carry1, output1_new, ones);
-    hn::Store(output1, d, output1_ptr);
+    auto carry =
+        hn::IfThenElseZero(hn::Lt(output_lo_new, output_lo), hn::Set(d, 1));
+    auto output_hi_new = hn::Add(output_hi, mul_hi);
+    output_hi_new = hn::Add(output_hi_new, carry);
+
+    hn::StoreInterleaved2(output_lo_new, output_hi_new, d, output_ptr);
   }
-  delete[] mask_lo_bits;
 
   // Handle the remaining elements in the input vectors.
   for (; i < num_coeffs; ++i) {
@@ -437,19 +400,6 @@ void BatchFusedMulDifferenceAddMontgomeryRepHwy(
   const int N = hn::Lanes(d);
   const int64_t num_coeffs = a.size();
 
-  // Generate the masks on the even lanes, which correspond to the lower 64 bits
-  // of BigInt64 (unsigned 128-bit int) values in the output vector.
-  uint8_t* mask_lo_bits = new uint8_t[(N + 7) / 8];
-  for (int j = 0; j < (N + 7) / 8; ++j) {
-    mask_lo_bits[j] = 0;
-    for (int k = 0; k < 8; k += 2) {
-      mask_lo_bits[j] |= static_cast<uint8_t>(1 << k);
-    }
-  }
-  auto mask_lo = hn::LoadMaskBits(d, mask_lo_bits);
-  // A highway vector whose odd lanes (higher 64 bits of the output vector) are
-  // all 1's and even lanes are all 0's.
-  auto ones = hn::Slide1Up(d, hn::IfThenElseZero(mask_lo, hn::Set(d, 1)));
   auto q_vec = hn::Set(d, q);
 
   int64_t i = 0;
@@ -460,51 +410,31 @@ void BatchFusedMulDifferenceAddMontgomeryRepHwy(
     const Uint64* c_ptr = reinterpret_cast<const Uint64*>(&c[i]);
     auto a_vec = hn::LoadU(d, a_ptr);
     auto b_vec = hn::LoadU(d, b_ptr);
-    auto c_vec = hn::LoadU(d, c_ptr);
 
     // Compute a[i] - b[i] (mod q).
     auto underflow_mask = hn::Lt(a_vec, b_vec);
     auto aa_vec = hn::IfThenElse(underflow_mask, hn::Add(a_vec, q_vec), a_vec);
     auto ab_vec = hn::Sub(aa_vec, b_vec);
 
-    // `hn::MulEven` and `hn::MulOdd` on 64-bit inputs produce a vector of
-    // 64-bit values with even lanes storing the lower half of product and odd
-    // lanes storing the upper half. That is,
-    //   mul_even = [abc[0].lo, abc[0].hi, abc[2].lo, abc[2].hi, ...]
-    //   mul_odd  = [abc[1].lo, abc[1].hi, abc[3].lo, abc[3].hi, ...]
-    // So we first merge the lower and upper halves, and then permute within
-    // each block of four 64-bit values, and get
-    //   mul0 = [abc[0].lo, abc[0].hi, abc[1].lo, abc[1].hi, ...]
-    //   mul1 = [abc[N/2].lo, abc[N/2].hi, abc[N/2+1].lo, abc[N/2+1].hi, ...]
-    auto mul_even = hn::MulEven(ab_vec, c_vec);
-    auto mul_odd = hn::MulOdd(ab_vec, c_vec);
-    auto mul_interleave0 = hn::InterleaveWholeLower(d, mul_even, mul_odd);
-    auto mul_interleave1 = hn::InterleaveWholeUpper(d, mul_even, mul_odd);
-    auto mul0 = hn::Per4LaneBlockShuffle<3, 1, 2, 0>(mul_interleave0);
-    auto mul1 = hn::Per4LaneBlockShuffle<3, 1, 2, 0>(mul_interleave1);
+    // Compute (a[i] - b[i]) (mod q) * c[i]
+    auto c_vec = hn::LoadU(d, c_ptr);
+    auto mul_lo = hn::Mul(ab_vec, c_vec);
+    auto mul_hi = hn::MulHigh(ab_vec, c_vec);
 
-    // Load the lower N/2 values from `output`.
-    Uint64* output0_ptr = reinterpret_cast<Uint64*>(&output[i]);
-    auto output0 = hn::Load(d, output0_ptr);
-    // Add the products to the output lanes. A carry bit occurs when the new
-    // lower 64-bit value becomes smaller, and we add 1 to the upper 64-bit lane
-    // if that happens.
-    auto output0_new = hn::Add(output0, mul0);
-    auto mask_carry0 = hn::And(hn::Lt(output0_new, output0), mask_lo);
-    mask_carry0 = hn::SlideMask1Up(d, mask_carry0);  // move the mask to hi64
-    output0 = hn::MaskedAddOr(output0_new, mask_carry0, output0_new, ones);
-    hn::Store(output0, d, output0_ptr);
+    // Load the lower and upper uint64_t parts of uint128 values from `output`.
+    Uint64* output_ptr = reinterpret_cast<Uint64*>(&output[i]);
+    hn::Vec<decltype(d)> output_lo, output_hi;
+    hn::LoadInterleaved2(d, output_ptr, output_lo, output_hi);
 
-    // Load the upper N/2 values from `output`.
-    Uint64* output1_ptr = reinterpret_cast<Uint64*>(&output[i]) + N;
-    auto output1 = hn::Load(d, output1_ptr);
-    auto output1_new = hn::Add(output1, mul1);
-    auto mask_carry1 = hn::And(hn::Lt(output1_new, output1), mask_lo);
-    mask_carry1 = hn::SlideMask1Up(d, mask_carry1);  // move the mask to hi64
-    output1 = hn::MaskedAddOr(output1_new, mask_carry1, output1_new, ones);
-    hn::Store(output1, d, output1_ptr);
+    auto output_lo_new = hn::Add(output_lo, mul_lo);
+
+    auto carry =
+        hn::IfThenElseZero(hn::Lt(output_lo_new, output_lo), hn::Set(d, 1));
+    auto output_hi_new = hn::Add(output_hi, mul_hi);
+    output_hi_new = hn::Add(output_hi_new, carry);
+
+    hn::StoreInterleaved2(output_lo_new, output_hi_new, d, output_ptr);
   }
-  delete[] mask_lo_bits;
 
   // Handle the remaining elements in the input vectors.
   for (; i < num_coeffs; ++i) {
