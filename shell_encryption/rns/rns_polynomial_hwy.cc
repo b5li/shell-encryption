@@ -783,6 +783,62 @@ void BatchFusedMulSumAddMontgomeryRep(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// FMDifferenceAdd
+////////////////////////////////////////////////////////////////////////////////
+
+template <typename Integer>
+void BatchFusedMulDifferenceAddMontgomeryRepNoHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    absl::Span<const MontgomeryInt<Integer>> c, Integer q,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output) {
+  using BigInteger = typename BigInt<Integer>::value_type;
+  for (int j = 0; j < a.size(); ++j) {
+    output[j] +=
+        static_cast<BigInteger>(a[j].GetMontgomeryRepresentation() + q -
+                                b[j].GetMontgomeryRepresentation()) *
+        c[j].GetMontgomeryRepresentation();
+  }
+}
+
+// For now we only instantiate the Uint32 and the specialized Uint64 versions,
+// as they are the most common integer types used in RNS RLWE schemes.
+HWY_EXPORT_T(BatchFusedMulDifferenceAddMontgomeryRepHwy32,
+             BatchFusedMulDifferenceAddMontgomeryRepHwy<Uint32>);
+HWY_EXPORT_T(BatchFusedMulDifferenceAddMontgomeryRepHwy64,
+             BatchFusedMulDifferenceAddMontgomeryRepHwy<Uint64>);
+
+template <typename T>
+void BatchFusedMulDifferenceAddMontgomeryRep(
+    absl::Span<const MontgomeryInt<T>> a, absl::Span<const MontgomeryInt<T>> b,
+    absl::Span<const MontgomeryInt<T>> c, T q,
+    hwy::AlignedVector<typename BigInt<T>::value_type>& output) {
+  BatchFusedMulDifferenceAddMontgomeryRepNoHwy(a, b, c, q, output);
+}
+
+// Specialized instantiation to use the highway version of FMA computation.
+template <>
+void BatchFusedMulDifferenceAddMontgomeryRep(
+    absl::Span<const MontgomeryInt<Uint32>> a,
+    absl::Span<const MontgomeryInt<Uint32>> b,
+    absl::Span<const MontgomeryInt<Uint32>> c, Uint32 q,
+    hwy::AlignedVector<BigInt<Uint32>::value_type>& output) {
+  HWY_DYNAMIC_DISPATCH_T(BatchFusedMulDifferenceAddMontgomeryRepHwy32)(
+      a, b, c, q, output);
+}
+
+// Specialized instantiation to use the highway version of FMA computation.
+template <>
+void BatchFusedMulDifferenceAddMontgomeryRep(
+    absl::Span<const MontgomeryInt<Uint64>> a,
+    absl::Span<const MontgomeryInt<Uint64>> b,
+    absl::Span<const MontgomeryInt<Uint64>> c, Uint64 q,
+    hwy::AlignedVector<BigInt<Uint64>::value_type>& output) {
+  HWY_DYNAMIC_DISPATCH_T(BatchFusedMulDifferenceAddMontgomeryRepHwy64)(
+      a, b, c, q, output);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Add
 ////////////////////////////////////////////////////////////////////////////////
 template <typename Integer>
