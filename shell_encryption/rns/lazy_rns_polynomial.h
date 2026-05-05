@@ -105,16 +105,6 @@ class LazyRnsPolynomial {
                              static_cast<BigInt>(1) << log_maximum_level);
   }
 
-  // Returns a lazy polynomial representing `a` + `b`.
-  static absl::StatusOr<LazyRnsPolynomial> CreateFromSum(
-      const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
-      absl::Span<const PrimeModulus<ModularInt>* const> moduli);
-
-  // Returns a lazy polynomial representing `a` - `b`.
-  static absl::StatusOr<LazyRnsPolynomial> CreateFromDifference(
-      const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
-      absl::Span<const PrimeModulus<ModularInt>* const> moduli);
-
   // Returns this polynomial reduced wrt `moduli`, as a RnsPolynomial in NTT
   // form.
   absl::StatusOr<RnsPolynomial<ModularInt>> Export(
@@ -143,11 +133,6 @@ class LazyRnsPolynomial {
       const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli);
 
-  absl::Status FusedMulAddInPlace(
-      const LazyRnsPolynomial<ModularInt>& a,
-      const RnsPolynomial<ModularInt>& b,
-      absl::Span<const PrimeModulus<ModularInt>* const> moduli);
-
   // Adds (a + b) * c (mod moduli) to this polynomial.
   absl::Status FusedMulSumAddInPlace(
       const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
@@ -158,10 +143,6 @@ class LazyRnsPolynomial {
   absl::Status FusedMulDifferenceAddInPlace(
       const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
       const RnsPolynomial<ModularInt>& c,
-      absl::Span<const PrimeModulus<ModularInt>* const> moduli);
-
-  absl::Status MulInPlace(
-      const RnsPolynomial<ModularInt>& a,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli);
 
  private:

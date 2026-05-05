@@ -137,22 +137,6 @@ class RnsRlweCiphertext {
     return absl::OkStatus();
   }
 
-  absl::StatusOr<RnsPolynomial<ModularInt>> AddWithoutPad(
-      const RnsRlweCiphertext& other) const {
-    if (components_.empty() || other.components_.empty()) {
-      return absl::InvalidArgumentError("cannot add empty ciphertext");
-    }
-    return components_[0].Add(other.components_[0], moduli_);
-  }
-
-  absl::StatusOr<RnsPolynomial<ModularInt>> SubWithoutPad(
-      const RnsRlweCiphertext& other) const {
-    if (components_.empty() || other.components_.empty()) {
-      return absl::InvalidArgumentError("cannot subtract empty ciphertext");
-    }
-    return components_[0].Sub(other.components_[0], moduli_);
-  }
-
   // Homomorphically add another ciphertext `that` to this ciphertext without
   // updating the "a" component (useful if it can be precomputed).
   absl::Status AddInPlaceWithoutPad(const RnsRlweCiphertext& that) {
@@ -386,45 +370,6 @@ class RnsRlweCiphertext {
     return absl::OkStatus();
   }
 
-  // Returns the ciphertext of the fused operation this + `ctxt` * `ptxt`, where
-  // this and `ctxt` are both degree 1 ciphertexts, without updating the "a"
-  // component in the resulting ciphertext. The "b" component of `ctxt` is given
-  // in `ctxt0` as a lazy polynomial.To use the ciphertext object for other
-  // operations, one needs to call `MergeLazyOperations` after done with lazy
-  // operations.
-  absl::Status FusedAbsorbAddInPlaceWithoutPadLazily(
-      const LazyRnsPolynomial<ModularInt>& ctxt0,
-      const RnsPolynomial<ModularInt>& ptxt) {
-    // If lazy_components_ is empty, this is the first time we call this
-    // function. We therefore create the vector of lazy polynomials 0.
-    if (lazy_components_.empty()) {
-      lazy_components_.reserve(1);
-      // Compute the non-"a" part.
-      RLWE_ASSIGN_OR_RETURN(
-          auto lazy,
-          LazyRnsPolynomial<ModularInt>::CreateZero(ptxt.LogN(), moduli_));
-      lazy_components_.push_back(std::move(lazy));
-    }
-
-    // Compute the non-"a" part.
-    RLWE_RETURN_IF_ERROR(
-        lazy_components_[0].FusedMulAddInPlace(ctxt0, ptxt, moduli_));
-
-    return absl::OkStatus();
-  }
-
-  absl::StatusOr<LazyRnsPolynomial<ModularInt>> AddWithoutPadLazily(
-      const RnsRlweCiphertext& other) const {
-    return LazyRnsPolynomial<ModularInt>::CreateFromSum(
-        components_[0], other.components_[0], moduli_);
-  }
-
-  absl::StatusOr<LazyRnsPolynomial<ModularInt>> SubWithoutPadLazily(
-      const RnsRlweCiphertext& other) const {
-    return LazyRnsPolynomial<ModularInt>::CreateFromDifference(
-        components_[0], other.components_[0], moduli_);
-  }
-
   absl::Status FusedAbsorbSumAddInPlaceWithoutPadLazily(
       const RnsRlweCiphertext& ctxt1, const RnsRlweCiphertext& ctxt2,
       const RnsPolynomial<ModularInt>& ptxt) {
@@ -447,9 +392,9 @@ class RnsRlweCiphertext {
       lazy_components_.reserve(1);
       // Compute the non-"a" part.
       RLWE_ASSIGN_OR_RETURN(
-          auto lazy, LazyRnsPolynomial<ModularInt>::CreateFromSum(
-                         ctxt1.components_[0], ctxt2.components_[0], moduli_));
-      RLWE_RETURN_IF_ERROR(lazy.MulInPlace(ptxt, moduli_));
+          auto sum, ctxt1.components_[0].Add(ctxt2.components_[0], moduli_));
+      RLWE_ASSIGN_OR_RETURN(
+          auto lazy, LazyRnsPolynomial<ModularInt>::Create(sum, ptxt, moduli_));
       lazy_components_.push_back(std::move(lazy));
       return absl::OkStatus();
     }
@@ -485,9 +430,9 @@ class RnsRlweCiphertext {
       lazy_components_.reserve(1);
       // Compute the non-"a" part.
       RLWE_ASSIGN_OR_RETURN(
-          auto lazy, LazyRnsPolynomial<ModularInt>::CreateFromDifference(
-                         ctxt1.components_[0], ctxt2.components_[0], moduli_));
-      RLWE_RETURN_IF_ERROR(lazy.MulInPlace(ptxt, moduli_));
+          auto diff, ctxt1.components_[0].Sub(ctxt2.components_[0], moduli_));
+      RLWE_ASSIGN_OR_RETURN(auto lazy, LazyRnsPolynomial<ModularInt>::Create(
+                                           diff, ptxt, moduli_));
       lazy_components_.push_back(std::move(lazy));
       return absl::OkStatus();
     }

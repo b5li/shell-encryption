@@ -110,6 +110,13 @@ class RnsBfvCiphertext : public RnsRlweCiphertext<ModularInt> {
     return out;
   }
 
+  absl::StatusOr<RnsBfvCiphertext> SubWithoutPad(
+      const RnsBfvCiphertext& that) const {
+    RnsBfvCiphertext out = *this;
+    RLWE_RETURN_IF_ERROR(out.SubInPlaceWithoutPad(that));
+    return out;
+  }
+
   // Returns the homomorphic absorbtion of this ciphertext and a plaintext.
   // It is assumed that the plaintext has coefficients modulo the plaintext
   // modulus of this ciphertext.
